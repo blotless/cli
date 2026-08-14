@@ -59,10 +59,12 @@ jobs:
         working-directory: cli
         run: go vet ./...
 
-      - name: Test
+      - name: Test with race
         if: matrix.os != 'windows-latest'
         working-directory: cli
         shell: bash
+        env:
+          CGO_ENABLED: "1"
         run: go test -race -count=1 -coverprofile=coverage.txt -covermode=atomic ./...
 
       - name: Test (windows, no race — race requires CGO)
