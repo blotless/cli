@@ -60,7 +60,7 @@ func TestExecuteExitErrorWithMessage(t *testing.T) {
 		t.Fatalf("code=%d", code)
 	}
 	// Force a path that prints exitError.msg via cobra — use invalid config file.
-	code = Execute([]string{"inspect", t.TempDir(), "--config", t.TempDir()+"/missing.yaml"}, Options{
+	code = Execute([]string{"inspect", t.TempDir(), "--config", t.TempDir() + "/missing.yaml"}, Options{
 		Stdout:  ioDiscard{},
 		Stderr:  &errBuf,
 		Version: "test",

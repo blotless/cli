@@ -15,8 +15,8 @@ import (
 )
 
 var (
-	auditCollect    = webaudit.Collect
-	auditFetchURL   = webaudit.FetchURL
+	auditCollect     = webaudit.Collect
+	auditFetchURL    = webaudit.FetchURL
 	testAuditCollect func(context.Context, webaudit.Options) (string, []string, error)
 	testAuditFetch   func(string) ([]byte, string, error)
 )
