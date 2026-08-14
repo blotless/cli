@@ -1,0 +1,183 @@
+# blotless/cli — pre-release & local checks
+# Requires: Go 1.26+, task (https://taskfile.dev), sibling ../engine (replace), golangci-lint
+
+version: "3"
+
+vars:
+  GOTOOLCHAIN: local
+  GOWRAP: unset GOROOT; export GOTOOLCHAIN=local;
+  BIN: blotless
+  COVER_OUT: coverage.txt
+  COVER_MIN: "85.0"
+
+env:
+  GOTOOLCHAIN: local
+
+tasks:
+  default:
+    desc: List tasks
+    cmds:
+      - task --list
+
+  fmt:
+    desc: Apply gofmt
+    cmds:
+      - gofmt -w .
+
+  fmt:check:
+    desc: Fail if any file needs gofmt
+    cmds:
+      - |
+        unset GOROOT
+        export GOTOOLCHAIN=local
+        bad=$(gofmt -l .)
+        if [ -n "$bad" ]; then
+          echo "ERROR: files not formatted:"
+          echo "$bad"
+          exit 1
+        fi
+        echo "gofmt: ok"
+
+  vet:
+    desc: go vet ./...
+    env:
+      CGO_ENABLED: "0"
+    cmds:
+      - '{{.GOWRAP}} go vet ./...'
+
+  tidy:
+    desc: go mod tidy (fail if dirty)
+    cmds:
+      - '{{.GOWRAP}} go mod tidy'
+      - |
+        unset GOROOT
+        export GOTOOLCHAIN=local
+        if ! git diff --quiet -- go.mod go.sum 2>/dev/null; then
+          echo "ERROR: go.mod/go.sum changed after tidy — commit the diff"
+          git diff -- go.mod go.sum || true
+          exit 1
+        fi
+        echo "tidy: ok"
+
+  tidy:write:
+    desc: go mod tidy (write)
+    cmds:
+      - '{{.GOWRAP}} go mod tidy'
+
+  lint:
+    desc: golangci-lint (must match CI)
+    cmds:
+      - '{{.GOWRAP}} golangci-lint run --timeout=5m'
+
+  test:
+    desc: Unit tests (CGO=0)
+    env:
+      CGO_ENABLED: "0"
+    cmds:
+      - '{{.GOWRAP}} go test -count=1 ./...'
+
+  test:race:
+    desc: Race tests (CGO=1; skip race on Windows)
+    env:
+      CGO_ENABLED: "1"
+    cmds:
+      - |
+        unset GOROOT
+        export GOTOOLCHAIN=local
+        if [ "{{OS}}" = "windows" ]; then
+          echo "skip race on Windows (requires CGO)"
+          go test -count=1 ./...
+        else
+          go test -race -count=1 ./...
+        fi
+
+  cover:
+    desc: Coverage with floor COVER_MIN (cli package focus via ./...)
+    env:
+      CGO_ENABLED: "1"
+    cmds:
+      - |
+        unset GOROOT
+        export GOTOOLCHAIN=local
+        if [ "{{OS}}" = "windows" ]; then
+          go test -count=1 -coverprofile={{.COVER_OUT}} -covermode=atomic ./...
+        else
+          go test -race -count=1 -coverprofile={{.COVER_OUT}} -covermode=atomic ./...
+        fi
+      - '{{.GOWRAP}} go tool cover -func={{.COVER_OUT}} | tail -1'
+      - |
+        pct=$(go tool cover -func={{.COVER_OUT}} | awk '/total:/ {gsub(/%/,"",$NF); print $NF}')
+        awk -v p="$pct" -v m="{{.COVER_MIN}}" 'BEGIN {
+          if ((p+0) < (m+0)) { printf "ERROR: coverage %.1f%% < %s%%\n", p, m; exit 1 }
+          printf "coverage: %.1f%% (>= %s%%)\n", p, m
+        }'
+
+  build:
+    desc: Build blotless binary (CGO=0)
+    env:
+      CGO_ENABLED: "0"
+    cmds:
+      - '{{.GOWRAP}} go build -trimpath -ldflags="-s -w" -o {{.BIN}} ./cmd/blotless'
+
+  build:cross:
+    desc: Cross-compile blotless for release targets
+    env:
+      CGO_ENABLED: "0"
+    cmds:
+      - '{{.GOWRAP}} GOOS=linux   GOARCH=amd64 go build -o /dev/null ./cmd/blotless'
+      - '{{.GOWRAP}} GOOS=linux   GOARCH=arm64 go build -o /dev/null ./cmd/blotless'
+      - '{{.GOWRAP}} GOOS=darwin  GOARCH=amd64 go build -o /dev/null ./cmd/blotless'
+      - '{{.GOWRAP}} GOOS=darwin  GOARCH=arm64 go build -o /dev/null ./cmd/blotless'
+      - '{{.GOWRAP}} GOOS=windows GOARCH=amd64 go build -o /dev/null ./cmd/blotless'
+
+  smoke:
+    desc: Build and smoke version --json
+    deps: [build]
+    cmds:
+      - ./{{.BIN}} version --json
+      - ./{{.BIN}} rules ls >/dev/null
+
+  goreleaser:check:
+    desc: Validate .goreleaser.yaml
+    cmds:
+      - '{{.GOWRAP}} goreleaser check'
+
+  goreleaser:snapshot:
+    desc: Local snapshot release (no publish)
+    cmds:
+      - '{{.GOWRAP}} goreleaser release --snapshot --clean'
+
+  # --- Pre-release ----------------------------------------------------------
+
+  preflight:
+    desc: Pre-release gate — fmt, vet, tidy, lint, race, cover, build, smoke, cross
+    cmds:
+      - task: fmt:check
+      - task: vet
+      - task: tidy
+      - task: lint
+      - task: test:race
+      - task: cover
+      - task: build:cross
+      - task: smoke
+      - |
+        if command -v goreleaser >/dev/null 2>&1; then
+          task goreleaser:check
+        else
+          echo "goreleaser not installed — skip check (optional)"
+        fi
+      - 'echo "cli preflight: OK"'
+  ci:
+    desc: Mirror primary CI jobs
+    cmds:
+      - task: fmt:check
+      - task: vet
+      - task: lint
+      - task: test:race
+      - task: build
+
+  clean:
+    desc: Remove build/coverage artifacts
+    cmds:
+      - rm -f {{.BIN}} {{.BIN}}.exe {{.COVER_OUT}} coverage.html
+      - rm -rf dist

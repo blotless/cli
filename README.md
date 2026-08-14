@@ -34,7 +34,7 @@
 | **Rewrite** | Layer B hook: `print-prompt` (default) / `ollama` / `openai`; strengths include backtranslate/structural |
 | **Reports** | table, JSON, YAML, SARIF |
 | **Config** | `.blotless.yaml` + `BLOTLESS_*` env |
-| **Build** | `CGO_ENABLED=0`, Go 1.26+; `version --json` build metadata |
+| **Build** | `CGO_ENABLED=0`, Go 1.26+; `task preflight` ([Taskfile.yml](Taskfile.yml)) |
 
 ---
 
