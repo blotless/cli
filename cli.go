@@ -224,22 +224,28 @@ func (rt *runtime) cleanCmd() *cobra.Command {
 	var write, inPlace, nfkc, layerB bool
 	var backup, strength, llm, llmModel, llmEndpoint, asKind string
 	var llmTimeout time.Duration
+	var astWASM, astExt []string
 	cmd := &cobra.Command{
 		Use:   "clean [path ...]",
-		Short: "Remove Layer A + Files; optional Layer B via --llm",
+		Short: "Remove Layer A + Files; optional Layer B via AST transform / --llm",
 		Long: `Strip Unicode/stamps and file metadata. Default is dry-run.
 
 Layer B (statistical) rewrite:
-  (no --llm)     agent does the rewrite (you are the model)
+  --layer-b      AST transform for Go/Python (offline) + optional LLM
+  (no --llm)     AST transform still applies; prose rewrite in the agent
   --llm=ollama   local Ollama (tree walk)
   --llm=native   OpenAI-compatible llama.cpp
-  --layer-b      include files even when Layer A is clean
   --strength     paraphrase | humanize | code | backtranslate | structural
+  --ast-wasm     lang=path.wasm (capability-sandboxed plugin)
+  --ast-ext      .rs=rust (map extra extensions; .rs is auto-mapped for rust)
 
 Single-file Layer B hook: blotless rewrite (print-prompt default).`,
 		Example: `  blotless clean .
   blotless clean . --write --aggressive --nfkc
-  blotless clean . --write --llm=ollama --layer-b --strength paraphrase`,
+  blotless clean . --write --layer-b
+  blotless clean . --write --llm=ollama --layer-b --strength paraphrase
+  blotless clean . --write --layer-b --ast-wasm rust=./rust_transform.wasm
+  blotless clean . --write --layer-b --ast-wasm zig=./zig_transform.wasm --ast-ext .zig=zig`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rt.cfg.Paths = args
 			if len(rt.cfg.Paths) == 0 {
@@ -264,6 +270,22 @@ Single-file Layer B hook: blotless rewrite (print-prompt default).`,
 				return fmt.Errorf("--strength must be paraphrase, humanize, code, backtranslate, or structural")
 			}
 			rt.cfg.LayerBStrength = strength
+			rt.cfg.AstWASM = map[string]string{}
+			for _, pair := range astWASM {
+				lang, path, ok := strings.Cut(pair, "=")
+				if !ok || strings.TrimSpace(lang) == "" || strings.TrimSpace(path) == "" {
+					return fmt.Errorf("--ast-wasm wants lang=path.wasm, got %q", pair)
+				}
+				rt.cfg.AstWASM[strings.TrimSpace(lang)] = strings.TrimSpace(path)
+			}
+			rt.cfg.AstExt = map[string]string{}
+			for _, pair := range astExt {
+				ext, lang, ok := strings.Cut(pair, "=")
+				if !ok || strings.TrimSpace(ext) == "" || strings.TrimSpace(lang) == "" {
+					return fmt.Errorf("--ast-ext wants .ext=lang, got %q", pair)
+				}
+				rt.cfg.AstExt[strings.TrimSpace(ext)] = strings.TrimSpace(lang)
+			}
 			if !cmd.Flags().Changed("llm") {
 				if v := strings.TrimSpace(viper.GetString("llm")); v != "" {
 					llm = v
@@ -283,12 +305,6 @@ Single-file Layer B hook: blotless rewrite (print-prompt default).`,
 				Model:    llmModel,
 				Endpoint: llmEndpoint,
 				Timeout:  llmTimeout,
-			}
-			if rt.cfg.LayerB {
-				mode := strings.ToLower(strings.TrimSpace(rt.cfg.LLM.Mode))
-				if mode == "" || mode == "off" || mode == "noop" {
-					fmt.Fprintln(rt.opts.Stderr, "blotless: --layer-b without --llm: cleaning A+Files; rewrite Layer B in the agent, or: blotless rewrite / --llm=ollama")
-				}
 			}
 			format := outputFormat(cmd)
 			rt.attachProgress(format)
@@ -315,11 +331,13 @@ Single-file Layer B hook: blotless rewrite (print-prompt default).`,
 	cmd.Flags().BoolVar(&nfkc, "nfkc", false, "Layer A: NFKC-normalize text after strip")
 	cmd.Flags().StringVar(&strength, "strength", "paraphrase", "Layer B rewrite: paraphrase|humanize|code|backtranslate|structural")
 	cmd.Flags().StringVar(&backup, "backup", "", "backup suffix, e.g. .bak")
-	cmd.Flags().BoolVar(&layerB, "layer-b", false, "Layer B even when A is clean; without --llm the agent rewrites")
+	cmd.Flags().BoolVar(&layerB, "layer-b", false, "Layer B even when A is clean (AST transform offline; LLM optional)")
 	cmd.Flags().StringVar(&llm, "llm", "off", "Layer B backend: off (agent) | ollama | native")
 	cmd.Flags().StringVar(&llmModel, "llm-model", "", "model name (default qwen2.5-coder:3b)")
 	cmd.Flags().StringVar(&llmEndpoint, "llm-endpoint", "", "Ollama URL; empty reuses :11434 or starts ollama")
 	cmd.Flags().DurationVar(&llmTimeout, "llm-timeout", 30*time.Second, "LLM request timeout")
+	cmd.Flags().StringArrayVar(&astWASM, "ast-wasm", nil, "WASM transform plugin lang=path.wasm (repeatable)")
+	cmd.Flags().StringArrayVar(&astExt, "ast-ext", nil, "map extra extension to lang, e.g. .zig=zig (repeatable)")
 	cmd.Flags().StringVar(&asKind, "as", "auto", "force kind: auto|text|image|container")
 	return cmd
 }

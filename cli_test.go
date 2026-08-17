@@ -194,7 +194,7 @@ func TestInspectJSONLayers(t *testing.T) {
 	}
 }
 
-func TestLayerBWithoutLLMIsAgentMode(t *testing.T) {
+func TestLayerBWithoutLLMStillRuns(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/notes.md"
 	body := strings.Repeat("This is ordinary prose without Layer A marks. ", 20)
@@ -206,14 +206,29 @@ func TestLayerBWithoutLLMIsAgentMode(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("code=%d err=%s out=%s", code, errBuf.String(), out.String())
 	}
-	if !strings.Contains(errBuf.String(), "agent") && !strings.Contains(errBuf.String(), "ollama") {
-		t.Fatalf("expected agent-mode note: %s", errBuf.String())
-	}
 	if strings.Contains(errBuf.String(), "starting ollama") {
 		t.Fatalf("must not start ollama: %s", errBuf.String())
 	}
 	if !strings.Contains(out.String(), "statwm.layer_b") && !strings.Contains(out.String(), `"b":`) {
 		t.Fatalf("expected Layer B in report: %s", out.String())
+	}
+}
+
+func TestLayerBASTTransformGo(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/main.go"
+	src := "package main\n\nfunc Hello(name string) string {\n\ttmp := name\n\treturn tmp\n}\n"
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	code := Execute([]string{"clean", path, "--layer-b", "--format", "json"}, Options{Stdout: &out, Stderr: ioDiscard{}, Version: "test"})
+	if code != ExitOK {
+		t.Fatalf("code=%d out=%s", code, out.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "statwm.ast_transform") && !strings.Contains(got, "AST transform") {
+		t.Fatalf("expected AST transform: %s", got)
 	}
 }
 
