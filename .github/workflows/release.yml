@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: blotless/engine
-                    path: engine
+          path: engine
 
       - uses: actions/setup-go@v5
         with:
